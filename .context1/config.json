@@ -1,0 +1,55 @@
+{
+  "output": {
+    "default_format": "markdown",
+    "follow_symlinks": false,
+    "max_file_size_kb": 500
+  },
+  "filters": {
+    "use_gitignore": true,
+    "binary_extensions": [
+      ".exe",
+      ".dll",
+      ".so",
+      ".dylib",
+      ".bin",
+      ".pkl",
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".gif",
+      ".ico",
+      ".svg",
+      ".zip",
+      ".tar",
+      ".gz",
+      ".7z",
+      ".rar",
+      ".pdf",
+      ".pyc",
+      ".pyo",
+      ".pyd",
+      ".class"
+    ],
+    "always_exclude": [
+      ".git",
+      ".svn",
+      ".hg",
+      ".idea",
+      ".vscode",
+      ".DS_Store",
+      "Thumbs.db",
+      "node_modules",
+      ".venv",
+      "venv",
+      "env",
+      "__pycache__",
+      "target",
+      "dist",
+      "build",
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      "poetry.lock"
+    ]
+  }
+}

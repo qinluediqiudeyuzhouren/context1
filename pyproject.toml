@@ -1,0 +1,16 @@
+[project]
+name = "context1"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pathspec>=0.12.1",
+    "pyperclip>=1.11.0",
+    "pytest>=9.0.1",
+    "rich>=14.2.0",
+    "typer[all]>=0.20.0",
+]
+
+[project.scripts]
+context1 = "context1.cli:app"
