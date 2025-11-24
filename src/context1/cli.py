@@ -34,13 +34,16 @@ def pack(
     """
     # 1. 初始化配置
     try:
-        config = load_config(strategy=strategy)
+        # 如果指定了源路径，使用它作为项目根目录；否则使用当前目录
+        force_project_root = source.resolve() if source != Path(".") else None
+        config = load_config(strategy=strategy, force_project_root=force_project_root)
+        
         # 如果未指定 output，默认为 {dir_name}.ctx1.md
         if not output and not clipboard:
             output = Path(f"{source.resolve().name}.ctx1.md")
             
         if verbose:
-            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}")
+            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}, Project Root={config.project_root}")
             
     except Exception as e:
         console.print(f"[red]Config Error:[/red] {e}")
@@ -56,7 +59,20 @@ def pack(
         raise typer.Exit()
 
     console.print(f"📄 Found {len(files)} files.")
-
+    
+    # 计算统计信息
+    total_size = sum(f.stat().st_size for f in files)
+    total_chars = sum(f.read_text(encoding='utf-8', errors='replace').__len__() for f in files)
+    estimated_tokens = total_chars // 4  # 粗略估算：1 token ≈ 4 characters
+    
+    # 显示统计信息
+    console.print(f"\n[bold cyan]📊 Pack Statistics:[/bold cyan]")
+    console.print(f"   📁 Total files: {len(files)}")
+    console.print(f"   📏 Total size: {total_size:,} bytes ({total_size/1024:.1f} KB)")
+    console.print(f"   🔤 Total characters: {total_chars:,}")
+    console.print(f"   🎯 Estimated tokens: {estimated_tokens:,}")
+    console.print(f"   📂 Strategy: {config.active_strategy}")
+    
     # 3. 生成内容
     content = generate_content(files, config)
 
@@ -64,12 +80,14 @@ def pack(
     if clipboard:
         import pyperclip
         pyperclip.copy(content)
-        console.print("[bold green]✅ Copied to clipboard![/bold green]")
+        console.print(f"\n[bold green]✅ Content copied to clipboard![/bold green]")
     
     if output:
         # 写入时自动忽略自己 (虽然 walker layer 1 应该已经排除了)
         output.write_text(content, encoding='utf-8')
-        console.print(f"[bold green]✅ Saved to {output}[/bold green]")
+        console.print(f"\n[bold green]✅ Packed content saved to: {output}[/bold green]")
+        console.print(f"   📄 Output size: {len(content)} characters")
+        console.print(f"   💾 File size: {output.stat().st_size:,} bytes ({output.stat().st_size/1024:.1f} KB)")
 
 # --- 子命令: Unpack ---
 @app.command()
@@ -183,9 +201,12 @@ def stats(
     
     # 1. 初始化配置
     try:
-        config = load_config(strategy=strategy)
+        # 如果指定了源路径，使用它作为项目根目录；否则使用当前目录
+        force_project_root = source.resolve() if source != Path(".") else None
+        config = load_config(strategy=strategy, force_project_root=force_project_root)
+        
         if verbose:
-            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}")
+            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}, Project Root={config.project_root}")
     except Exception as e:
         console.print(f"[red]Config Error:[/red] {e}")
         raise typer.Exit(1)

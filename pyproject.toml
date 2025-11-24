@@ -1,9 +1,24 @@
 [project]
 name = "context1"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.1"
+description = "在您的代码库和 LLM 之间架设桥梁的强大 CLI 工具"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Context1 Contributors", email = "support@context1.dev"},
+]
+keywords = ["cli", "llm", "code", "packaging", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "pathspec>=0.12.1",
     "pyperclip>=1.11.0",
@@ -13,4 +28,5 @@ dependencies = [
 ]
 
 [project.scripts]
+ctx1 = "context1.cli:app"
 context1 = "context1.cli:app"

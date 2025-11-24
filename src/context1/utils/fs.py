@@ -41,7 +41,44 @@ def is_binary_file(file_path: Path, chunk_size: int = 1024) -> bool:
     try:
         with open(file_path, 'rb') as f:
             chunk = f.read(chunk_size)
-            return b'\x00' in chunk
+            
+            # 如果文件为空，则不是二进制文件
+            if not chunk:
+                return False
+            
+            # 检查是否包含 NULL 字节
+            has_null = b'\x00' in chunk
+            
+            # 如果包含 NULL 字节，检查是否可能是 UTF-16 编码的文本
+            if has_null:
+                # 检查是否是 UTF-16 BOM
+                if chunk.startswith(b'\xff\xfe') or chunk.startswith(b'\xfe\xff'):
+                    # 可能是 UTF-16 编码的文本，不是二进制文件
+                    return False
+                
+                # 检查是否是纯文本的 UTF-16 编码（每个字符后跟 NULL 字节）
+                # 如果大部分字符都是字母数字，并且 NULL 字节规律分布，可能是 UTF-16 文本
+                null_positions = [i for i, b in enumerate(chunk) if b == 0]
+                if len(null_positions) > 0:
+                    # 检查 NULL 字节是否规律分布（每2个字节一个NULL）
+                    is_utf16_pattern = True
+                    for i in range(1, len(null_positions)):
+                        if null_positions[i] - null_positions[i-1] != 2:
+                            is_utf16_pattern = False
+                            break
+                    
+                    # 如果大部分内容都是可打印字符，可能是 UTF-16 文本
+                    printable_count = sum(1 for b in chunk if 32 <= b <= 126)
+                    if is_utf16_pattern and printable_count > len(chunk) * 0.3:
+                        return False
+            
+            # 如果包含 NULL 字节且不是 UTF-16 文本，则是二进制文件
+            if has_null:
+                return True
+            
+            # 如果没有 NULL 字节，则不是二进制文件
+            return False
+            
     except IOError:
         return False
 

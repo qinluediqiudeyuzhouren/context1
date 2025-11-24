@@ -163,7 +163,7 @@ def test_walker_blacklist_strategy():
         # 创建黑名单策略文件
         ctx_dir = base_dir / ".context1"
         ctx_dir.mkdir()
-        
+
         blacklist_file = ctx_dir / "blacklist.json"
         blacklist_data = {
             "patterns": ["*.json", "src/"]
@@ -202,7 +202,7 @@ def test_walker_whitelist_strategy():
         # 创建白名单策略文件
         ctx_dir = base_dir / ".context1"
         ctx_dir.mkdir()
-        
+
         whitelist_file = ctx_dir / "whitelist.json"
         whitelist_data = {
             "patterns": ["*.py", "README.md"]

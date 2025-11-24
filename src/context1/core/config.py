@@ -65,12 +65,15 @@ class Config:
         )
 
 class ConfigManager:
-    def __init__(self, start_path: Path = Path(".")):
+    def __init__(self, start_path: Path = Path("."), force_project_root: Optional[Path] = None):
         self.start_path = start_path.resolve()
-        # 自动定位项目根目录（寻找 .context1）
-        from context1.utils.fs import get_project_root
-        self.project_root = get_project_root(self.start_path)
-        self.config_dir = self.project_root / ".context1"
+        # 如果强制指定了项目根目录，使用它；否则自动定位
+        if force_project_root:
+            self.project_root = force_project_root.resolve()
+        else:
+            from context1.utils.fs import get_project_root
+            self.project_root = get_project_root(self.start_path)
+        self.ctx_dir = self.project_root / ".context1"
 
     def _load_json(self, path: Path) -> Dict:
         if path.exists() and path.is_file():
@@ -105,7 +108,7 @@ class ConfigManager:
         final_data = self._deep_merge(final_data, user_data)
 
         # 3. 项目级配置 (.context1/config.json)
-        project_config_path = self.config_dir / "config.json"
+        project_config_path = self.ctx_dir / "config.json"
         project_data = self._load_json(project_config_path)
         final_data = self._deep_merge(final_data, project_data)
 
@@ -119,5 +122,5 @@ class ConfigManager:
         return config
 
 # 便捷入口
-def load_config(strategy: Optional[str] = None) -> Config:
-    return ConfigManager().load(strategy)
+def load_config(strategy: Optional[str] = None, force_project_root: Optional[Path] = None) -> Config:
+    return ConfigManager(force_project_root=force_project_root).load(strategy)

@@ -106,7 +106,19 @@ def generate_content(files: List[Path], config: Config, tree_view: bool = True) 
             if file_size > config.max_file_size_kb * 1024:
                 content = f"<!-- File skipped: size ({file_size} bytes) > {config.max_file_size_kb}KB -->"
             else:
-                content = file_path.read_text(encoding='utf-8', errors='replace')
+                # 尝试 UTF-8 编码，如果失败则尝试 UTF-16
+                try:
+                    content = file_path.read_text(encoding='utf-8')
+                except UnicodeDecodeError:
+                    # 如果 UTF-8 失败，尝试 UTF-16
+                    try:
+                        content = file_path.read_text(encoding='utf-16')
+                    except UnicodeDecodeError:
+                        # 如果都失败，使用二进制模式读取并转义
+                        with open(file_path, 'rb') as f:
+                            binary_content = f.read()
+                            content = binary_content.hex()  # 转换为十六进制字符串
+                        content = f"<!-- Binary file content (hex): {content} -->"
             
             if config.output_format == "xml":
                 # XML Format
