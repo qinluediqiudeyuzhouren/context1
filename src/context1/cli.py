@@ -8,7 +8,7 @@ from typing import Optional
 from rich.console import Console
 
 # 导入 Core 模块
-from context1.core.config import load_config
+from context1.core.config import load_config, OutputFormat
 from context1.core.walker import FileWalker
 from context1.core.packer import generate_content
 from context1.core.unpacker import unpack_project
@@ -26,6 +26,8 @@ def pack(
     source: Path = typer.Argument(".", help="源目录路径", exists=True),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="输出文件路径"),
     strategy: str = typer.Option("smart", "--strategy", "-s", help="过滤策略: smart/whitelist/blacklist"),
+    sort: str = typer.Option("name", "--sort", help="排序策略: name/vscode/dslpp"),
+    format: str = typer.Option("markdown", "--format", help="输出格式: markdown/python-bundle"),
     clipboard: bool = typer.Option(False, "--clipboard", "-c", help="复制到剪贴板"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="显示详细日志")
 ):
@@ -38,12 +40,26 @@ def pack(
         force_project_root = source.resolve() if source != Path(".") else None
         config = load_config(strategy=strategy, force_project_root=force_project_root)
         
-        # 如果未指定 output，默认为 {dir_name}.ctx1.md
+        # 设置新的配置选项
+        config.sort_strategy = sort
+        config.output_format = format
+        
+        # 更新对应的枚举属性
+        try:
+            config.output_format_enum = OutputFormat(format)
+        except ValueError:
+            # 如果格式无效，使用默认值
+            config.output_format_enum = OutputFormat.MARKDOWN
+        
+        # 如果未指定 output，默认为 {dir_name}.ctx1.md 或 .py
         if not output and not clipboard:
-            output = Path(f"{source.resolve().name}.ctx1.md")
+            if format == "python-bundle":
+                output = Path(f"{source.resolve().name}.ctx1.py")
+            else:
+                output = Path(f"{source.resolve().name}.ctx1.md")
             
         if verbose:
-            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}, Project Root={config.project_root}")
+            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}, Sort={sort}, Format={format}, Project Root={config.project_root}")
             
     except Exception as e:
         console.print(f"[red]Config Error:[/red] {e}")
@@ -95,6 +111,8 @@ def unpack(
     file: Path = typer.Argument(..., help="聚合文档路径", exists=True),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="目标还原目录"),
     force: bool = typer.Option(False, "--force", "-f", help="强制覆盖已存在的文件"),
+    tree: Optional[Path] = typer.Option(None, "--tree", help="重构结构树路径 (.tree)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="仅预览操作，不写入磁盘"),
 ):
     """
     将聚合文档还原为项目结构。
@@ -110,11 +128,36 @@ def unpack(
         
     console.print(f"📂 Unpacking to: [bold]{output}[/bold]")
     
-    stats = unpack_project(file, output, force=force)
+    # 检查是否为重构模式
+    if tree:
+        console.print(f"🌳 Refactor mode using tree: [bold]{tree}[/bold]")
     
-    console.print(f"[green]Success: {stats['success']}[/green], "
-                  f"[yellow]Skipped: {stats['skipped']}[/yellow], "
-                  f"[red]Failed: {stats['failed']}[/red]")
+    # 执行解包
+    stats = unpack_project(
+        file,
+        output,
+        force=force,
+        tree_path=tree,
+        dry_run=dry_run
+    )
+    
+    # 显示结果
+    if dry_run:
+        console.print("\n[bold yellow]🔍 Dry Run Results:[/bold yellow]")
+        console.print(f"🎯 Match: {stats.get('match', 0)} files")
+        console.print(f"🏗️  Scaffold: {stats.get('scaffold', 0)} files")
+        console.print(f"⚠️  Conflict: {stats.get('conflict', 0)} files")
+        console.print(f"❌ Failed: {stats.get('failed', 0)} files")
+    else:
+        if tree:
+            console.print("\n[bold green]✅ Refactor completed![/bold green]")
+            console.print(f"🎯 Match: {stats.get('match', 0)} files")
+            console.print(f"🏗️  Scaffold: {stats.get('scaffold', 0)} files")
+            console.print(f"⚠️  Conflict: {stats.get('conflict', 0)} files")
+        else:
+            console.print(f"[green]✅ Success: {stats.get('success', 0)}[/green], "
+                         f"[yellow]⏭️  Skipped: {stats.get('skipped', 0)}[/yellow], "
+                         f"[red]❌ Failed: {stats.get('failed', 0)}[/red]")
 
 # --- 子命令: Config & Stats ---
 @app.command()
@@ -282,3 +325,4 @@ def stats(
 
 if __name__ == "__main__":
     app()
+

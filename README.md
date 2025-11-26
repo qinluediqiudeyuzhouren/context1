@@ -8,10 +8,11 @@
 
 ## 📖 简介
 
-Context1 是一个专为开发者设计的命令行工具，能够将您的项目代码打包成单一文本上下文，为大型语言模型（LLM）提供完整的代码上下文信息。它支持智能文件过滤、目录树生成、配置管理和安全路径检查，是您与 AI 协作开发的得力助手。
+Context1 是一个专为开发者设计的命令行工具，能够将您的项目代码打包成单一文本上下文，为大型语言模型（LLM）提供完整的代码上下文信息。它支持智能文件过滤、多种排序策略、元数据提取、智能重构等高级功能，是您与 AI 协作开发的得力助手。
 
 ## ✨ 主要特性
 
+### 🚀 核心功能
 - 🚀 **智能文件过滤** - 支持 smart、whitelist、blacklist 三种过滤策略
 - 🌳 **ASCII 目录树** - 生成类似 Linux `tree` 命令的目录结构
 - 🔒 **安全防护** - 内置 Zip Slip 攻击防护机制
@@ -19,6 +20,14 @@ Context1 是一个专为开发者设计的命令行工具，能够将您的项�
 - 🎨 **美观界面** - 使用 Rich 库提供丰富的终端输出
 - ⚙️ **灵活配置** - 支持项目级、用户级和默认配置
 - 🧪 **全面测试** - 包含完整的单元测试套件
+
+### 🏗️ v0.2.0 新增功能
+- **DS-LPP 拓扑排序** - 基于领域驱动设计的智能文件排序
+- **Python Bundle 格式** - 生成的包本身就是合法的 Python 代码文件
+- **元数据提取** - 自动识别 `@Role` 和 `@Responsibility` 注解
+- **智能重构引擎** - 基于结构树的文件重构和重命名
+- **试运行模式** - 预览重构操作，避免意外覆盖
+- **内容池机制** - 智能解决重名文件问题
 
 ## 📦 安装
 
@@ -93,12 +102,20 @@ context1 pack [OPTIONS] SOURCE
 - `-o, --output PATH`: 输出文件路径
 - `-c, --clipboard`: 复制到剪贴板
 - `-s, --strategy {smart,whitelist,blacklist}`: 过滤策略（默认：smart）
+- `--sort {name,vscode,dslpp}`: 排序策略（默认：name）
+- `--format {markdown,python-bundle}`: 输出格式（默认：markdown）
 - `-v, --verbose`: 显示详细日志
 
 **示例：**
 ```bash
 # 基本打包
 context1 pack .
+
+# 使用 DS-LPP 排序和 Python Bundle 格式
+context1 pack . --sort dslpp --format python-bundle -o project.py
+
+# 使用 VSCode 风格排序
+context1 pack . --sort vscode -o project.md
 
 # 输出到指定文件
 context1 pack ./my-project -o project.md

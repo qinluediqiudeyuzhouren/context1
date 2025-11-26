@@ -4,9 +4,41 @@ src/context1/core/config.py
 """
 import json
 import os
+from enum import Enum
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
+
+# ==========================================
+# 👇 1. 先定义枚举和常量 (必须放在最前面！)
+# ==========================================
+
+# --- 枚举定义 ---
+class OutputFormat(Enum):
+    """输出格式枚举"""
+    MARKDOWN = "markdown"
+    PYTHON_BUNDLE = "python-bundle"
+
+class SortStrategy(Enum):
+    """排序策略枚举"""
+    NAME = "name"
+    VSCODE = "vscode"
+    DSLPP = "dslpp"
+
+# --- DS-LPP 权重配置常量 ---
+DEFAULT_DSLPP_WEIGHTS = [
+    {"pattern": "__init__.py", "weight": 0},
+    {"pattern": "*_ent.py", "weight": 10}, {"pattern": "*_d.py", "weight": 10},
+    {"pattern": "*_i.py", "weight": 10},   {"pattern": "*_c.py", "weight": 10},
+    {"pattern": "*_bhv.py", "weight": 20}, {"pattern": "*_u.py", "weight": 20},
+    {"pattern": "*_stg.py", "weight": 30}, {"pattern": "*_s.py", "weight": 30},
+    {"pattern": "*_cmd.py", "weight": 40},
+    {"pattern": "test_*.py", "weight": 99}
+]
+
+# ==========================================
+# 👇 2. 然后再定义 DEFAULT_CONFIG (因为它引用了上面的常量)
+# ==========================================
 
 # --- 默认硬编码配置 (Layer 1 Base Rules) ---
 DEFAULT_CONFIG = {
@@ -32,8 +64,17 @@ DEFAULT_CONFIG = {
             "__pycache__", "target", "dist", "build",
             "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"
         ]
+    },
+    "sort": {
+        "strategy": "name",
+        # ✅ 现在这里可以正确引用了，因为上面已经定义了
+        "dslpp_weights": DEFAULT_DSLPP_WEIGHTS
     }
 }
+
+# ==========================================
+# 👇 3. 最后定义类和逻辑
+# ==========================================
 
 @dataclass
 class Config:
@@ -47,21 +88,46 @@ class Config:
     always_exclude: List[str] = field(default_factory=list)
     # 策略相关
     active_strategy: str = "smart"  # smart, whitelist, blacklist, all
+    # 新增字段：输出格式和排序策略
+    output_format_enum: OutputFormat = OutputFormat.MARKDOWN
+    sort_strategy: SortStrategy = SortStrategy.NAME
+    dslpp_weights: List[Dict[str, Any]] = field(default_factory=lambda: DEFAULT_DSLPP_WEIGHTS.copy())
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any], project_root: Path) -> 'Config':
         """从合并后的字典创建 Config 对象"""
         output = data.get("output", {})
         filters = data.get("filters", {})
+        sort_config = data.get("sort", {})
+        
+        # 处理输出格式枚举
+        output_format_str = output.get("default_format", "markdown")
+        try:
+            output_format_enum = OutputFormat(output_format_str)
+        except ValueError:
+            output_format_enum = OutputFormat.MARKDOWN
+        
+        # 处理排序策略枚举
+        sort_strategy_str = sort_config.get("strategy", "name")
+        try:
+            sort_strategy = SortStrategy(sort_strategy_str)
+        except ValueError:
+            sort_strategy = SortStrategy.NAME
+        
+        # 处理 DSLPP 权重配置
+        dslpp_weights = sort_config.get("dslpp_weights", DEFAULT_DSLPP_WEIGHTS)
         
         return cls(
             project_root=project_root,
-            output_format=output.get("default_format", "markdown"),
+            output_format=output_format_str,
+            output_format_enum=output_format_enum,
             follow_symlinks=output.get("follow_symlinks", False),
             max_file_size_kb=output.get("max_file_size_kb", 500),
             use_gitignore=filters.get("use_gitignore", True),
             binary_extensions=filters.get("binary_extensions", []),
-            always_exclude=filters.get("always_exclude", [])
+            always_exclude=filters.get("always_exclude", []),
+            sort_strategy=sort_strategy,
+            dslpp_weights=dslpp_weights
         )
 
 class ConfigManager:

@@ -1,6 +1,6 @@
 [project]
 name = "context1"
-version = "0.1.1"
+version = "0.2.0"
 description = "在您的代码库和 LLM 之间架设桥梁的强大 CLI 工具"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,9 +24,11 @@ dependencies = [
     "pyperclip>=1.11.0",
     "pytest>=9.0.1",
     "rich>=14.2.0",
-    "typer[all]>=0.20.0",
+    "typer>=0.20.0",
 ]
 
 [project.scripts]
 ctx1 = "context1.cli:app"
 context1 = "context1.cli:app"
+
+
