@@ -172,55 +172,97 @@ def generate_layout_tree(files: List[Path], root: Path) -> str:
     
     return "\n".join(tree_lines)
 
-def generate_tree(files: List[Path], root: Path) -> str:
-    """生成 ASCII 目录树结构 (类似 Linux tree 命令)"""
+def generate_tree(files: List[Path], root: Path, format_type: str = "ascii") -> str:
+    """生成目录树结构
+    Args:
+        files: 文件列表
+        root: 根目录
+        format_type: 格式类型 ("simple" 或 "ascii")
+    """
+    if format_type == "ascii":
+        return generate_ascii_tree(files, root)
+    else:
+        return generate_simple_tree(files, root)
+
+def generate_simple_tree(files: List[Path], root: Path) -> str:
+    """生成简单的目录树结构（当前格式）"""
     tree_lines = ["# Project Structure"]
-    tree_lines.append(".")
     
-    # 按目录分组文件
-    dir_files = {}
+    # 过滤掉噪音文件
+    filtered_files = []
     for file_path in files:
         rel_path = file_path.relative_to(root)
+        # 排除 __init__.py, __pycache__ 等
+        if (rel_path.name != "__init__.py" and
+            "__pycache__" not in rel_path.parts and
+            not rel_path.name.startswith(".")):
+            filtered_files.append(file_path)
+    
+    # 按目录分组
+    dir_structure = {}
+    for file_path in filtered_files:
+        rel_path = file_path.relative_to(root)
         dir_path = rel_path.parent
-        if dir_path not in dir_files:
-            dir_files[dir_path] = []
-        dir_files[dir_path].append(rel_path)
-    
-    # 生成目录树
-    def build_tree_display(path: Path, prefix: str = "", is_last: bool = True) -> List[str]:
-        lines = []
-        name = path.name if path != Path(".") else "."
-        lines.append(f"{prefix}{'└── ' if is_last else '├── '}{name}")
         
-        if path in dir_files:
-            children = sorted(dir_files[path], key=lambda x: (x.is_file(), x.name))
-            for i, child in enumerate(children):
-                child_prefix = prefix + ("    " if is_last else "│   ")
-                is_last_child = i == len(children) - 1
-                if child.is_file():
-                    lines.append(f"{child_prefix}{'└── ' if is_last_child else '├── '}{child.name}")
-                else:
-                    lines.extend(build_tree_display(child, child_prefix, is_last_child))
+        # 确保目录以 / 结尾
+        dir_key = str(dir_path) + "/" if dir_path != Path(".") else "./"
+        if dir_key not in dir_structure:
+            dir_structure[dir_key] = []
+        dir_structure[dir_key].append(rel_path.name)
+    
+    # 生成树结构
+    for dir_key in sorted(dir_structure.keys()):
+        tree_lines.append(dir_key)
+        for filename in sorted(dir_structure[dir_key]):
+            tree_lines.append(f"  {filename}")
+    
+    return "\n".join(tree_lines)
+
+def generate_ascii_tree(files: List[Path], root: Path) -> str:
+    """生成 ASCII 目录树结构 (支持无限层级)"""
+    # 1. 构建嵌套的字典树结构
+    # 结构示例: {'src': {'context1': {'cli.py': None, 'core': {'packer.py': None}}}}
+    tree_structure = {}
+    
+    for file_path in files:
+        try:
+            rel_path = file_path.relative_to(root)
+        except ValueError:
+            # 如果文件不在root下，直接使用文件名
+            rel_path = Path(file_path.name)
+            
+        parts = rel_path.parts
+        current_level = tree_structure
         
-        return lines
-    
-    # 从根目录开始构建
-    root_files = [f for f in files if f.parent == root]
-    root_dirs = [d for d in dir_files.keys() if d != Path(".") and d.parent == root]
-    
-    # 先显示根目录文件
-    for i, file_path in enumerate(sorted(root_files, key=lambda x: x.name)):
-        is_last = i == len(root_files) - 1 and len(root_dirs) == 0
-        prefix = "" if is_last else "│   "
-        lines = build_tree_display(file_path.relative_to(root), prefix, is_last)
-        tree_lines.extend(lines)
-    
-    # 再显示根目录
-    for i, dir_path in enumerate(sorted(root_dirs, key=lambda x: x.name)):
-        is_last = i == len(root_dirs) - 1
-        prefix = "" if is_last else "│   "
-        lines = build_tree_display(dir_path, prefix, is_last)
-        tree_lines.extend(lines)
+        for part in parts:
+            if part not in current_level:
+                current_level[part] = {}
+            current_level = current_level[part]
+
+    # 2. 递归遍历树结构生成 ASCII 字符串
+    tree_lines = ["# Project Structure", "."]
+
+    def build_tree_lines(current_level: dict, prefix: str = ""):
+        # 获取当前层级的所有节点（文件和文件夹），按名称排序
+        entries = sorted(current_level.keys())
+        
+        for i, entry in enumerate(entries):
+            is_last = (i == len(entries) - 1)
+            
+            # 确定连接符
+            connector = "└── " if is_last else "├── "
+            
+            # 添加当前行
+            tree_lines.append(f"{prefix}{connector}{entry}")
+            
+            # 如果该节点还有子节点（是文件夹），则递归
+            # 注意：我们用空字典 {} 代表文件（叶子节点），非空字典代表文件夹
+            if current_level[entry]:
+                extension = "    " if is_last else "│   "
+                build_tree_lines(current_level[entry], prefix + extension)
+
+    # 开始递归
+    build_tree_lines(tree_structure)
     
     return "\n".join(tree_lines)
 
@@ -331,11 +373,7 @@ def generate_content(files: List[Path], config: Config, tree_view: bool = True) 
                 output.append(f"<!-- Error reading {rel_path}: {str(e)} -->\n")
     
     # 6. 生成布局蓝图
-    if config.output_format_enum == OutputFormat.PYTHON_BUNDLE:
-        layout_tree_content = generate_layout_tree(files_sorted, root)
-        layout_tree_path = config.project_root / ".context1" / "layout.tree"
-        layout_tree_path.parent.mkdir(exist_ok=True)
-        layout_tree_path.write_text(layout_tree_content, encoding='utf-8')
+    # 6. 生成布局蓝图 (已移至CLI层，避免重复生成)
     
     # 7. 封装输出
     if config.output_format_enum == OutputFormat.PYTHON_BUNDLE:

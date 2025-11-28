@@ -6,11 +6,21 @@ import typer
 from pathlib import Path
 from typing import Optional
 from rich.console import Console
+"""
+src/context1/cli.py
+CLI 主入口 - 职责：命令路由、参数解析、UI反馈
+[修正版] 增加了对 .context1 目录中 tree 文件的自动查找
+"""
+
+import typer
+from pathlib import Path
+from typing import Optional
+from rich.console import Console
 
 # 导入 Core 模块
 from context1.core.config import load_config, OutputFormat
 from context1.core.walker import FileWalker
-from context1.core.packer import generate_content
+from context1.core.packer import generate_content, generate_tree
 from context1.core.unpacker import unpack_project
 
 app = typer.Typer(
@@ -29,6 +39,325 @@ def pack(
     sort: str = typer.Option("name", "--sort", help="排序策略: name/vscode/dslpp"),
     format: str = typer.Option("markdown", "--format", help="输出格式: markdown/python-bundle"),
     clipboard: bool = typer.Option(False, "--clipboard", "-c", help="复制到剪贴板"),
+    generate_tree_file: bool = typer.Option(True, "--tree/--no-tree", help="生成结构树文件 (默认开启)"),
+    tree_format: str = typer.Option("ascii", "--tree-format", help="树文件格式: ascii/simple"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="显示详细日志")
+):
+    """
+    将项目代码打包为单一文本上下文。
+    """
+    try:
+        force_project_root = source.resolve() if source != Path(".") else None
+        config = load_config(strategy=strategy, force_project_root=force_project_root)
+        
+        config.sort_strategy = sort
+        config.output_format = format
+        try:
+            config.output_format_enum = OutputFormat(format)
+        except ValueError:
+            config.output_format_enum = OutputFormat.MARKDOWN
+        
+        if not output and not clipboard:
+            if format == "python-bundle":
+                output = Path(f"{source.resolve().name}.ctx1.py")
+            else:
+                output = Path(f"{source.resolve().name}.ctx1.md")
+            
+        if verbose:
+            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}, Sort={sort}, Format={format}, Project Root={config.project_root}")
+            
+    except Exception as e:
+        console.print(f"[red]Config Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    walker = FileWalker(config)
+    with console.status("[bold green]Scanning files..."):
+        files = walker.scan()
+    
+    if not files:
+        console.print("[yellow]⚠️  No files found matching the criteria.[/yellow]")
+        raise typer.Exit()
+
+    console.print(f"📄 Found {len(files)} files.")
+    
+    total_size = sum(f.stat().st_size for f in files)
+    total_chars = sum(f.read_text(encoding='utf-8', errors='replace').__len__() for f in files)
+    estimated_tokens = total_chars // 4
+    
+    console.print(f"\n[bold cyan]📊 Pack Statistics:[/bold cyan]")
+    console.print(f"   📁 Total files: {len(files)}")
+    console.print(f"   📏 Total size: {total_size:,} bytes ({total_size/1024:.1f} KB)")
+    console.print(f"   🔤 Total characters: {total_chars:,}")
+    console.print(f"   🎯 Estimated tokens: {estimated_tokens:,}")
+    console.print(f"   📂 Strategy: {config.active_strategy}")
+    
+    content = generate_content(files, config)
+
+    if generate_tree_file:
+        tree_content = generate_tree(files, config.project_root, format_type=tree_format)
+        context1_dir = config.project_root / ".context1"
+        context1_dir.mkdir(exist_ok=True)
+        
+        if output:
+            tree_filename = output.name.replace('.md', '.tree').replace('.py', '.tree')
+        else:
+            tree_filename = f"{source.resolve().name}.ctx1.tree"
+        
+        tree_output = context1_dir / tree_filename
+        tree_output.write_text(tree_content, encoding='utf-8')
+        console.print(f"\n[bold green]✅ Architecture Tree generated: {tree_output}[/bold green]")
+
+    if clipboard:
+        import pyperclip
+        pyperclip.copy(content)
+        console.print(f"\n[bold green]✅ Content copied to clipboard![/bold green]")
+    
+    if output:
+        output.write_text(content, encoding='utf-8')
+        console.print(f"\n[bold green]✅ Packed content saved to: {output}[/bold green]")
+        console.print(f"   📄 Output size: {len(content)} characters")
+        console.print(f"   💾 File size: {output.stat().st_size:,} bytes ({output.stat().st_size/1024:.1f} KB)")
+
+# --- 子命令: Unpack ---
+@app.command()
+def unpack(
+    file: Path = typer.Argument(..., help="聚合文档路径", exists=True),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="目标还原目录"),
+    force: bool = typer.Option(False, "--force", "-f", help="强制覆盖已存在的文件"),
+    tree: Optional[Path] = typer.Option(None, "--tree", "-t", help="指定重构结构树文件 (.tree)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="仅预览操作，不写入磁盘"),
+):
+    """
+    将聚合文档还原为项目结构。
+    """
+    if not output:
+        dir_name = file.name.replace('.md', '').replace('.py', '')
+        if not dir_name.endswith('.ctx1'):
+            dir_name += '.ctx1'
+        output = file.parent / dir_name
+        
+    console.print(f"📂 Unpacking to: [bold]{output}[/bold]")
+    
+    # [Fix] 增强的 Tree 自动查找逻辑
+    final_tree_path = tree
+    
+    # 只有当用户没有显式指定 --tree 时，才尝试自动查找
+    if not final_tree_path:
+        base_name = file.stem
+        if base_name.endswith('.ctx1'): 
+             base_name = base_name.replace('.ctx1', '')
+             
+        # 查找候选列表：增加了 .context1 目录
+        candidates = [
+            file.parent / f"{file.name}.tree",                 
+            file.parent / f"{base_name}.tree",                 
+            file.parent / f"{base_name}.ctx1.tree",            
+            file.parent / ".context1" / f"{file.name}.tree",   
+            file.parent / ".context1" / f"{base_name}.ctx1.tree",
+            # 同时也查找当前工作目录
+            Path.cwd() / f"{file.name}.tree",
+            Path.cwd() / ".context1" / f"{file.name}.tree",
+            Path.cwd() / ".context1" / f"{base_name}.ctx1.tree"
+        ]
+        
+        for cand in candidates:
+            if cand.exists():
+                console.print(f"🌳 Auto-detected tree file: [bold]{cand}[/bold]")
+                final_tree_path = cand
+                break
+
+    # 如果找到了 Tree 文件，或者用户指定了 Tree 文件
+    if final_tree_path:
+        if not final_tree_path.exists():
+            console.print(f"[red]❌ Tree file not found: {final_tree_path}[/red]")
+            raise typer.Exit(1)
+        console.print(f"🌳 Refactor mode using tree: [bold]{final_tree_path}[/bold]")
+    
+    stats = unpack_project(
+        file,
+        output,
+        force=force,
+        tree_path=final_tree_path, # 传入找到的路径
+        dry_run=dry_run
+    )
+
+# ... (Config & Stats 命令保持不变) ...
+@app.command()
+def config(
+    action: str = typer.Argument(..., help="操作: init/list"),
+    path: Optional[Path] = typer.Option(None, "--path", "-p", help="配置文件路径")
+):
+    """管理配置文件 (Init/List)"""
+    from context1.core.config import ConfigManager
+    import json
+    
+    config_manager = ConfigManager()
+    
+    if action == "init":
+        if path:
+            config_path = path
+        else:
+            config_path = config_manager.config_dir / "config.json"
+        
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        default_config = {
+            "output": {
+                "default_format": "markdown",
+                "follow_symlinks": False,
+                "max_file_size_kb": 500
+            },
+            "filters": {
+                "use_gitignore": True,
+                "binary_extensions": [
+                    ".exe", ".dll", ".so", ".dylib", ".bin", ".pkl",
+                    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
+                    ".zip", ".tar", ".gz", ".7z", ".rar", ".pdf",
+                    ".pyc", ".pyo", ".pyd", ".class"
+                ],
+                "always_exclude": [
+                    ".git", ".svn", ".hg", ".idea", ".vscode",
+                    ".DS_Store", "Thumbs.db",
+                    "node_modules", ".venv", "venv", "env",
+                    "__pycache__", "target", "dist", "build",
+                    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"
+                ]
+            }
+        }
+        
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(default_config, f, indent=2, ensure_ascii=False)
+        
+        console.print(f"[bold green]✅ Created default config at: {config_path}[/bold green]")
+        
+    elif action == "list":
+        try:
+            config = config_manager.load()
+            console.print("[bold blue]Current Configuration:[/bold blue]")
+            console.print(f"  Project Root: {config.project_root}")
+            console.print(f"  Output Format: {config.output_format}")
+            console.print(f"  Max File Size: {config.max_file_size_kb}KB")
+            console.print(f"  Use Gitignore: {config.use_gitignore}")
+            console.print(f"  Active Strategy: {config.active_strategy}")
+            console.print(f"  Binary Extensions: {len(config.binary_extensions)} types")
+            console.print(f"  Always Exclude: {len(config.always_exclude)} patterns")
+        except Exception as e:
+            console.print(f"[red]Error loading config: {e}[/red]")
+            raise typer.Exit(1)
+            
+    else:
+        console.print(f"[red]Unknown action: {action}[/red]")
+        console.print("Available actions: init, list")
+        raise typer.Exit(1)
+
+@app.command()
+def stats(
+    source: Path = typer.Argument(".", help="源目录路径", exists=True),
+    strategy: str = typer.Option("smart", "--strategy", "-s", help="过滤策略: smart/whitelist/blacklist"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="显示详细日志")
+):
+    """显示项目统计信息与 Token 估算"""
+    from rich.table import Table
+    from rich.panel import Panel
+    
+    try:
+        force_project_root = source.resolve() if source != Path(".") else None
+        config = load_config(strategy=strategy, force_project_root=force_project_root)
+        
+        if verbose:
+            console.log(f"🔍 Loaded Config: Strategy={config.active_strategy}, Project Root={config.project_root}")
+    except Exception as e:
+        console.print(f"[red]Config Error:[/red] {e}")
+        raise typer.Exit(1)
+    
+    walker = FileWalker(config)
+    with console.status("[bold green]Scanning files for stats..."):
+        files = walker.scan()
+    
+    if not files:
+        console.print("[yellow]⚠️  No files found matching the criteria.[/yellow]")
+        raise typer.Exit()
+    
+    total_files = len(files)
+    total_size = 0
+    total_chars = 0
+    
+    file_extensions = {}
+    
+    for file_path in files:
+        try:
+            file_stats = file_path.stat()
+            file_size = file_stats.st_size
+            total_size += file_size
+            
+            try:
+                content = file_path.read_text(encoding='utf-8', errors='replace')
+                total_chars += len(content)
+                
+                ext = file_path.suffix.lower() or '(no extension)'
+                file_extensions[ext] = file_extensions.get(ext, 0) + 1
+                
+            except Exception:
+                pass
+                
+        except Exception:
+            pass
+    
+    table = Table(title="Project Statistics")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="magenta")
+    
+    table.add_row("Total Files", str(total_files))
+    table.add_row("Total Size", f"{total_size / 1024 / 1024:.2f} MB")
+    table.add_row("Estimated Tokens", f"{total_chars // 4:,}")
+    
+    if file_extensions:
+        sorted_extensions = sorted(file_extensions.items(), key=lambda x: x[1], reverse=True)[:10]
+        ext_summary = ", ".join([f"{ext} ({count})" for ext, count in sorted_extensions])
+        table.add_row("Top Extensions", ext_summary)
+    
+    console.print(table)
+    
+    if verbose:
+        details_panel = Panel(
+            f"Strategy: {config.active_strategy}\n"
+            f"Project Root: {config.project_root}\n"
+            f"Max File Size: {config.max_file_size_kb}KB\n"
+            f"Use Gitignore: {config.use_gitignore}",
+            title="Configuration Details",
+            border_style="blue"
+        )
+        console.print(details_panel)
+
+if __name__ == "__main__":
+    app()
+
+# 导入 Core 模块
+from context1.core.config import load_config, OutputFormat
+from context1.core.walker import FileWalker
+from context1.core.packer import generate_content, generate_tree
+from context1.core.unpacker import unpack_project
+
+app = typer.Typer(
+    name="ctx1",
+    help="Context1: The bridge between your codebase and LLMs.",
+    add_completion=False
+)
+console = Console()
+
+# --- 子命令: Pack ---
+@app.command()
+def pack(
+    source: Path = typer.Argument(".", help="源目录路径", exists=True),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="输出文件路径"),
+    strategy: str = typer.Option("smart", "--strategy", "-s", help="过滤策略: smart/whitelist/blacklist"),
+    sort: str = typer.Option("name", "--sort", help="排序策略: name/vscode/dslpp"),
+    format: str = typer.Option("markdown", "--format", help="输出格式: markdown/python-bundle"),
+    clipboard: bool = typer.Option(False, "--clipboard", "-c", help="复制到剪贴板"),
+    # [修改点 1] 默认开启生成树，参数改为 --no-tree 以便用户选择关闭
+    generate_tree_file: bool = typer.Option(True, "--tree/--no-tree", help="生成结构树文件 (默认开启)"),
+    # [修改点 2] 默认格式改为 ascii
+    tree_format: str = typer.Option("ascii", "--tree-format", help="树文件格式: ascii/simple"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="显示详细日志")
 ):
     """
@@ -92,7 +421,31 @@ def pack(
     # 3. 生成内容
     content = generate_content(files, config)
 
-    # 4. 输出
+    # 4. 生成结构树 (如果启用)
+    if generate_tree_file:
+        tree_content = generate_tree(files, config.project_root, format_type=tree_format)
+        
+        # 创建 .context1 目录
+        context1_dir = config.project_root / ".context1"
+        context1_dir.mkdir(exist_ok=True)
+        
+        # 与pack文档名字一致，但放在 .context1 目录中
+        if output:
+            tree_filename = output.name.replace('.md', '.tree').replace('.py', '.tree')
+        else:
+            # 如果没有指定output，使用默认的输出文件名
+            if format == "python-bundle":
+                tree_filename = f"{source.resolve().name}.ctx1.tree"
+            else:
+                tree_filename = f"{source.resolve().name}.ctx1.tree"
+        
+        tree_output = context1_dir / tree_filename
+        
+        tree_output.write_text(tree_content, encoding='utf-8')
+        console.print(f"\n[bold green]✅ Architecture Tree generated: {tree_output}[/bold green]")
+        console.print(f"   📄 Tree format: {tree_format}")
+
+    # 5. 输出
     if clipboard:
         import pyperclip
         pyperclip.copy(content)
@@ -111,7 +464,8 @@ def unpack(
     file: Path = typer.Argument(..., help="聚合文档路径", exists=True),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="目标还原目录"),
     force: bool = typer.Option(False, "--force", "-f", help="强制覆盖已存在的文件"),
-    tree: Optional[Path] = typer.Option(None, "--tree", help="重构结构树路径 (.tree)"),
+    tree: bool = typer.Option(False, "--tree", help="自动查找与文件同名的.tree文件进行重构"),
+    tree_path: Optional[Path] = typer.Option(None, "--tree-path", help="指定重构结构树路径 (.tree)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="仅预览操作，不写入磁盘"),
 ):
     """
@@ -128,16 +482,44 @@ def unpack(
         
     console.print(f"📂 Unpacking to: [bold]{output}[/bold]")
     
-    # 检查是否为重构模式
+    # 处理 tree 参数
+    final_tree_path = None
     if tree:
-        console.print(f"🌳 Refactor mode using tree: [bold]{tree}[/bold]")
+        # 如果使用了 --tree 标志，自动查找与文件同名的 .tree 文件
+        base_name = file.stem  # 去掉扩展名
+        auto_candidates = [
+            file.parent / f"{base_name}.tree",
+            Path.cwd() / f"{base_name}.tree"
+        ]
+        
+        for candidate in auto_candidates:
+            if candidate.exists():
+                final_tree_path = candidate
+                console.print(f"🌳 Auto-detected tree file: [bold]{final_tree_path}[/bold]")
+                break
+        
+        if not final_tree_path:
+            console.print("[yellow]⚠️  No auto-detected tree file found.[/yellow]")
+            console.print(f"Looking for: {base_name}.tree in the source directory or current directory")
+            console.print("Use --tree-path <path> to specify a tree file manually.")
+            # 不退出，继续使用普通模式
+    
+    if tree_path is not None:
+        # 如果指定了 --tree-path 参数
+        if tree_path.exists():
+            final_tree_path = tree_path
+            console.print(f"🌳 Refactor mode using tree: [bold]{final_tree_path}[/bold]")
+        else:
+            console.print(f"[red]❌ Tree file not found: {tree_path}[/red]")
+            console.print("Please specify a valid tree file path.")
+            raise typer.Exit(1)
     
     # 执行解包
     stats = unpack_project(
         file,
         output,
         force=force,
-        tree_path=tree,
+        tree_path=final_tree_path,
         dry_run=dry_run
     )
     
